@@ -8,12 +8,16 @@ license: MIT
 
 Use the Letta API directly when an agent needs to change its own model, context window, system prompt, or reasoning effort.
 
+## When to use this skill
+
+Use this skill for runtime changes to an existing Letta agent or conversation. For provider setup, API keys, server configuration, or choosing a model for a new agent, use the broader Letta configuration/API skills instead.
+
 ## Choose the target
 
 - **Agent default:** `PATCH /v1/agents/$AGENT_ID`. Persists across conversations. Use for model defaults and system prompt changes.
 - **Current conversation:** `PATCH /v1/conversations/$CONVERSATION_ID`. Affects only this thread. Use for high-frequency changes like a context window slider or temporary model/reasoning changes.
 
-Use `AGENT_ID` for yourself. Use `CONVERSATION_ID` for the current thread when it is available.
+Use `AGENT_ID` for yourself. Use `CONVERSATION_ID` for the current thread when it is available. In Letta Code it is usually injected into the runtime context; in custom apps, track the conversation ID returned by the Conversations API.
 
 ```bash
 BASE_URL="${LETTA_BASE_URL:-https://api.letta.com}"
@@ -45,14 +49,16 @@ curl -sS -X PATCH "$BASE_URL/v1/conversations/$CONVERSATION_ID" \
 
 ## Agent-level model update
 
-Use this for persistent defaults. Omit fields you are not changing.
+Use this for persistent defaults. Omit top-level fields you are not changing.
+
+**Important:** `model_settings` is usually treated as a replacement object, not a deep merge. Read the current agent first and include any existing model settings you want to keep.
 
 ```bash
 curl -sS -X PATCH "$BASE_URL/v1/agents/$AGENT_ID" \
   -H "Authorization: Bearer $LETTA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai/gpt-5.5",
+    "model": "openai/gpt-5.2",
     "context_window_limit": 272000,
     "model_settings": {
       "provider_type": "openai",
@@ -63,7 +69,7 @@ curl -sS -X PATCH "$BASE_URL/v1/agents/$AGENT_ID" \
   }'
 ```
 
-`model_settings` may replace prior model settings. Include fields you want to keep. For agent responses, verify the effective context window at `llm_config.context_window`.
+For agent responses, verify the effective context window at `llm_config.context_window`.
 
 ## Conversation-scoped model update
 
@@ -77,7 +83,7 @@ curl -sS -X PATCH "$BASE_URL/v1/conversations/$CONVERSATION_ID" \
   -H "Authorization: Bearer $LETTA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai/gpt-5.5",
+    "model": "openai/gpt-5.2",
     "context_window_limit": 64000,
     "model_settings": {
       "provider_type": "openai",
@@ -94,10 +100,10 @@ Pick the shape that matches the provider. Do not send OpenAI reasoning fields to
 | Provider/model handle | Reasoning shape |
 | --- | --- |
 | `openai/...` | `model_settings.reasoning.reasoning_effort` |
-| `chatgpt_oauth/...` or ChatGPT OAuth provider | `model_settings.reasoning.reasoning_effort` with `provider_type: "chatgpt_oauth"` |
+| `chatgpt_oauth/...` or ChatGPT OAuth provider | `model_settings.reasoning.reasoning_effort` with `provider_type: "chatgpt_oauth"`; do not assume every OpenAI effort value is accepted |
 | `anthropic/...` | `model_settings.effort`, optionally `model_settings.thinking` |
-| `bedrock/...` Claude models | `model_settings.effort`, optionally `model_settings.thinking`, with `provider_type: "bedrock"` |
-| `google_ai/...` or `google_vertex/...` | `model_settings.thinking_config.thinking_budget` |
+| `bedrock/...` Claude models | `provider_type: "bedrock"`; check the current API schema before sending reasoning fields |
+| `google_ai/...` or `google_vertex/...` | `model_settings.thinking_config.thinking_budget`, optionally `include_thoughts` |
 
 OpenAI:
 
@@ -128,7 +134,7 @@ Google AI:
 {
   "provider_type": "google_ai",
   "parallel_tool_calls": true,
-  "thinking_config": { "thinking_budget": 12000 }
+  "thinking_config": { "thinking_budget": 12000, "include_thoughts": false }
 }
 ```
 
@@ -154,6 +160,52 @@ curl -sS -X PATCH "$BASE_URL/v1/agents/$AGENT_ID" \
   -d '{"system": "<FULL replacement system prompt. Preserve important existing instructions.>"}'
 ```
 
+## TypeScript SDK equivalent
+
+```typescript
+import { Letta } from "@letta-ai/letta-client";
+
+const client = new Letta({ token: process.env.LETTA_API_KEY! });
+
+await client.agents.update(process.env.AGENT_ID!, {
+  model: "openai/gpt-5.2",
+  contextWindowLimit: 64000,
+  modelSettings: {
+    providerType: "openai",
+    parallelToolCalls: true,
+    reasoning: { reasoningEffort: "medium" },
+  },
+});
+```
+
+## Python SDK equivalent
+
+```python
+import os
+from letta_client import Letta
+
+client = Letta(token=os.environ["LETTA_API_KEY"])
+client.agents.update(
+    agent_id=os.environ["AGENT_ID"],
+    model="openai/gpt-5.2",
+    context_window_limit=64000,
+    model_settings={
+        "provider_type": "openai",
+        "parallel_tool_calls": True,
+        "reasoning": {"reasoning_effort": "medium"},
+    },
+)
+```
+
+For a conversation-scoped override:
+
+```python
+client.conversations.update(
+    conversation_id=os.environ["CONVERSATION_ID"],
+    context_window_limit=64000,
+)
+```
+
 ## TypeScript fetch equivalent
 
 ```typescript
@@ -168,7 +220,7 @@ await fetch(`${baseUrl}/v1/agents/${agentId}`, {
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
-    model: "openai/gpt-5.5",
+    model: "openai/gpt-5.2",
     context_window_limit: 272000,
     model_settings: {
       provider_type: "openai",
