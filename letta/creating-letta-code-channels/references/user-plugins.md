@@ -1,5 +1,17 @@
 # Dynamic user channel plugins
 
+## Table of contents
+
+- Layout
+- channel.json
+- accounts.json
+- Minimal plugin contract
+- messageActions
+- Runtime dependencies
+- Headless pairing
+- Security
+- Debugging
+
 ## Layout
 
 ```text
@@ -14,7 +26,9 @@
     node_modules/
 ```
 
-`channel.json`:
+Use dynamic plugins for community/headless channels and fast experiments. Do not use first-party ids (`telegram`, `slack`, `discord`); the registry skips user plugins that shadow them.
+
+## channel.json
 
 ```json
 {
@@ -27,15 +41,16 @@
 ```
 
 Rules:
+
 - `id` must match the directory name.
-- Do not use first-party ids (`telegram`, `slack`, `discord`). The registry skips them.
 - `entry` is relative to the channel directory and must not escape it.
-- `runtimePackages` install to `runtime/` via `letta channels install <id>`.
-- User plugin bare imports usually need `~/.letta/channels/<id>/node_modules -> runtime/node_modules` symlink. Letta Code links this after installing user-plugin runtime dependencies.
+- `runtimePackages` install under `runtime/` via `letta channels install <id>`.
+- `runtimeModules` are what the plugin imports/checks.
+- Runtime resolution should not count parent/dev repo `node_modules`.
 
-## Account shape
+## accounts.json
 
-User plugins should rely on `account.config`, not first-party fields.
+Use `account.config` for plugin-owned settings:
 
 ```json
 {
@@ -127,13 +142,33 @@ Inbound messages must call `adapter.onMessage(msg)` with:
   threadId?: string | null;
   chatType?: "direct" | "channel";
   isMention?: boolean;
+  attachments?: ChannelMessageAttachment[];
+  reaction?: ChannelReactionEvent;
   raw?: unknown;
 }
 ```
 
+## messageActions
+
+Every reply-capable plugin needs `messageActions`. See `references/message-actions.md` for details. Without it, inbound can work while outbound silently fails.
+
+## Runtime dependencies
+
+Install runtime deps:
+
+```bash
+letta channels install <id>
+```
+
+Check:
+
+- Dependencies are under `~/.letta/channels/<id>/runtime/node_modules`.
+- User plugin import can resolve them, often through a `node_modules` symlink beside `plugin.mjs`.
+- The runtime resolver does not falsely pass because the monorepo has the dependency installed.
+
 ## Headless pairing
 
-User plugins are headless. Pair from CLI:
+Pair from CLI:
 
 ```bash
 letta channels pair \
@@ -154,6 +189,21 @@ letta channels route add \
 ```
 
 `dmPolicy` behavior:
+
 - `pairing`: unknown senders get a pairing code. Good for manual tests.
 - `allowlist`: only `allowedUsers` sender IDs pass. Good for known headless users.
 - `open`: everyone can reach routing lookup. Use with explicit routes or safe public channels.
+
+## Security
+
+- Do not expose tool approval/control prompts publicly.
+- Treat platform user IDs and channel IDs as untrusted input.
+- Avoid logging secrets from `account.config`.
+- Avoid dynamic imports outside the plugin directory and runtime dependency paths.
+
+## Debugging
+
+- Plugin not discovered: id mismatch, invalid id chars, bad `channel.json`, first-party id shadowing.
+- Install passes but import fails: runtime deps are not actually in the user plugin runtime path.
+- Pairing code repeats: pairing was redeemed for different `accountId`/sender or listener did not reload store.
+- Reply no-ops: missing `messageActions` or wrong route keys.
